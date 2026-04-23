@@ -1,0 +1,14 @@
+model:
+  name: gpt-4o-mini
+  temperature: 0
+
+embedding:
+  model: text-embedding-3-small
+
+data:
+  products: data/products.csv
+  reviews: data/reviews.csv
+  orders: data/orders.csv
+
+vectorstore:
+  persist_dir: vectorstore/
