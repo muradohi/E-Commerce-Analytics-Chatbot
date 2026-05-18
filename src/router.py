@@ -1,64 +1,31 @@
-from langchain_openai import ChatOpenAI
-import json
-
-def route_query(query: str, cfg):
-
-    llm = ChatOpenAI(
-        model=cfg["model"]["name"],
-        temperature=0
-    )
-
+def route_query(query, llm):
+    """
+    Decides whether the query should go to:
+    - pandas: questions about numbers/totals/averages
+    - rag: questions about customer opinions/reviews
+    - hybrid: questions that need both
+    """
     prompt = f"""
-You are an expert routing system for an e-commerce AI assistant.
+Classify this question into one of three categories.
 
-Your job is to classify the user query into exactly ONE of the following tools:
+- "pandas": Asks for numbers, totals, averages, counts, percentages.
+            Example: "What's our total revenue?" or "Top 5 products?"
 
-1. "pandas"
-   - Use when the question requires calculations, aggregations, trends, totals, comparisons, or numerical analysis.
-   - Examples: revenue, sales, counts, averages, top products, performance over time.
+- "rag": Asks about customer opinions, feedback, themes from reviews.
+         Example: "What do customers say about shipping?"
 
-2. "rag"
-   - Use when the question is about product descriptions, features, reviews, or semantic understanding of text.
-   - Examples: "What do customers think of X?", "Describe product Y", "What is this product used for?"
+- "hybrid": Needs BOTH numbers AND review insights.
+            Example: "Why is our top-selling product getting bad reviews?"
 
-3. "hybrid"
-   - Use when the question requires BOTH numerical analysis AND explanation or context from text.
-   - Examples: "Why did sales drop for product X?", "Compare performance and explain reasons."
+Question: "{query}"
 
----
-
-IMPORTANT RULES:
-- Return ONLY valid JSON.
-- Do NOT include explanations.
-- Do NOT output anything except JSON.
-- Always choose the MOST appropriate single route.
-
----
-
-OUTPUT FORMAT:
-{{"route": "pandas" | "rag" | "hybrid"}}
-
----
-
-EXAMPLES:
-
-Query: What is total revenue last month?
-Output: {{"route": "pandas"}}
-
-Query: What do users say about the wireless mouse?
-Output: {{"route": "rag"}}
-
-Query: Why did sales drop for product A compared to reviews?
-Output: {{"route": "hybrid"}}
-
-Query:
-{query}
-
-Output:
+Respond with ONLY ONE word: pandas, rag, or hybrid.
 """
 
-    try:
-        result = llm.invoke(prompt).content
-        return json.loads(result)["route"]
-    except:
+    response = llm.invoke(prompt).content.strip().lower()
+
+    if "pandas" in response:
+        return "pandas"
+    if "hybrid" in response:
         return "hybrid"
+    return "rag"  

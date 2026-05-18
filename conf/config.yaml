@@ -1,14 +1,17 @@
 model:
-  name: gpt-4o-mini
+  name: "gpt-4o-mini"
   temperature: 0
 
 embedding:
-  model: text-embedding-3-small
+  model: "text-embedding-3-small"
 
 data:
-  products: data/products.csv
-  reviews: data/reviews.csv
-  orders: data/orders.csv
+  products: "data/products.csv"
+  orders: "data/orders.csv"
+  reviews: "data/reviews.csv"
 
 vectorstore:
-  persist_dir: vectorstore/
+  persist_dir: "./chroma_db"
+
+retrieval:
+  top_k: 3
