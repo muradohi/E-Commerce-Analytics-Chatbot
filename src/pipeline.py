@@ -1,88 +1,115 @@
-from src.router import route_query
-from src.pandas_tool import load_data, run_pandas_query
-from src.rag_tool import retrieve_docs
 from src.llm import get_llm
+from src.router import route_query
+from src.data_loader import load_data
+from src.pandas_tool import run_pandas_query
+from src.rag_tool import retrieve_docs
 from src.evaluation import evaluate_answer
 
 
-def run_pipeline(query, vectordb, cfg):
-
+def run_pipeline(query, vectordb, cfg, df=None):
+    """
+    Main entry point. Takes a query, routes it, gets an answer, evaluates it.
+    """
     llm = get_llm(cfg)
-    route = route_query(query, cfg)
-    df = load_data(cfg)
 
-    answer = None
+    # Load data if not already loaded
+    if df is None:
+        df = load_data(cfg)
+
+    # Step 1: Figure out which tool to use
+    route = route_query(query, llm)
+
+    answer = ""
     context = ""
 
-    # -----------------------
-    # PANDAS
-    # -----------------------
+    # =========================================
+    # PATH 1: Pandas (number questions)
+    # =========================================
     if route == "pandas":
-
-        result = run_pandas_query(df, query)
+        result, code = run_pandas_query(df, query, llm)
+        context = f"Code used:\n{code}\n\nResult:\n{result}"
 
         prompt = f"""
-Explain this business result clearly:
-
-{result}
+You are a business analyst. Explain this result clearly for a non-technical user.
 
 Question: {query}
+Code used: {code}
+Result: {result}
+
+Give a clear, one-paragraph explanation. Do not invent numbers beyond what's shown.
 """
         answer = llm.invoke(prompt).content
 
-        # convert structured result into context for evaluation
-        context = str(result)
-
-    # -----------------------
-    # RAG
-    # -----------------------
+    # =========================================
+    # PATH 2: RAG (text questions)
+    # =========================================
     elif route == "rag":
-
-        docs = retrieve_docs(vectordb, query)
-        context = "\n".join([d.page_content for d in docs])
+        docs = retrieve_docs(vectordb, query, top_k=cfg["retrieval"]["top_k"])
+        context = "\n\n".join([d.page_content for d in docs])
 
         prompt = f"""
-Answer using ONLY this context:
+You are an e-commerce assistant. Answer using ONLY the context below.
 
+Context:
 {context}
 
 Question: {query}
+
+Rules:
+- Be concise
+- Use only information from the context
+- If the context doesn't have the answer, say "I don't have enough information"
 """
         answer = llm.invoke(prompt).content
 
-    # -----------------------
-    # HYBRID
-    # -----------------------
-    else:
+    # =========================================
+    # PATH 3: Hybrid (both)
+    # =========================================
+    else:  # route == "hybrid"
+        result, code = run_pandas_query(df, query, llm)
 
-        docs = retrieve_docs(vectordb, query)
-        context = "\n".join([d.page_content for d in docs])
+        # Check if Pandas failed or returned empty
+        if isinstance(result, str) and result.startswith("Error"):
+            sales_context = "Sales data could not be computed for this question."
+        elif hasattr(result, 'empty') and result.empty:
+            sales_context = "No matching sales records found."
+        else:
+            sales_context = f"Code used: {code}\nResult:\n{result}"
 
-        result = run_pandas_query(df, query)
+        # Get review side
+        docs = retrieve_docs(vectordb, query, top_k=cfg["retrieval"]["top_k"])
+        retrieved_text = "\n\n".join([d.page_content for d in docs])
+
+        context = f"SALES DATA:\n{sales_context}\n\nCUSTOMER REVIEWS:\n{retrieved_text}"
 
         prompt = f"""
-Combine structured and unstructured data:
+You are a business analyst. Answer the question using BOTH sources below.
 
-STRUCTURED:
-{result}
+SALES DATA:
+{sales_context}
 
-CONTEXT:
-{context}
+CUSTOMER REVIEWS:
+{retrieved_text}
 
-Question:
-{query}
+Question: {query}
+
+Rules:
+- Use both sources where relevant
+- If sales data is missing, answer using only the reviews and explicitly note the missing data
+- Be clear about what each source tells you
+- Do not invent numbers or facts beyond what's shown
 """
         answer = llm.invoke(prompt).content
 
-        context = f"{result}\n{context}"
-
-    # -----------------------
-    # EVALUATION (COMMON FOR ALL)
-    # -----------------------
-    evaluation = evaluate_answer(query, context, answer)
+    # =========================================
+    # Evaluation (runs for all paths)
+    # =========================================
+    evaluation = evaluate_answer(query, context, answer, llm)
 
     return {
+        "query": query,
+        "route": route,
         "answer": answer,
-        "evaluation": evaluation,
-        "route": route
+        "context": context,
+        "evaluation": evaluation
     }

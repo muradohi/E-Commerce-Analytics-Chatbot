@@ -15,7 +15,7 @@ from src.rag_tool import build_vectorstore
 st.set_page_config(
     page_title="E-Commerce AI Assistant",
     page_icon="🛒",
-    layout="centered"
+    layout="wide"
 )
 
 st.title("🛒 E-Commerce AI Assistant")
@@ -45,29 +45,47 @@ cfg["model"]["temperature"] = st.sidebar.slider(
     float(cfg["model"]["temperature"])
 )
 
+if st.sidebar.button("🗑️ Clear chat"):
+    st.session_state.messages = []
+    st.rerun()
+
 # ---------------------------
-# VECTORSTORE
+# VECTORSTORE (built once)
 # ---------------------------
 @st.cache_resource
 def load_vectordb(cfg):
     products = pd.read_csv(cfg["data"]["products"])
     reviews = pd.read_csv(cfg["data"]["reviews"])
 
+    # Build product_id -> name lookup for richer review context
+    product_lookup = dict(zip(products["product_id"], products["name"]))
+
     docs = []
 
+    # Add product descriptions
     for _, r in products.iterrows():
         docs.append(Document(
             page_content=f"Product: {r['name']}. Description: {r['description']}",
-            metadata={"type": "product"}
+            metadata={"type": "product", "product_id": r["product_id"]}
         ))
 
+    # Add reviews with full context (product name + rating)
     for _, r in reviews.iterrows():
+        product_name = product_lookup.get(r["product_id"], "Unknown product")
         docs.append(Document(
-            page_content=f"Review: {r['review_text']}",
-            metadata={"type": "review"}
+            page_content=(
+                f"Review for {product_name} ({r['rating']} stars): "
+                f"{r['review_text']}"
+            ),
+            metadata={
+                "type": "review",
+                "product_id": r["product_id"],
+                "rating": r["rating"]
+            }
         ))
 
     return build_vectorstore(docs, cfg)
+
 
 vectordb = load_vectordb(cfg)
 
@@ -90,8 +108,7 @@ for msg in st.session_state.messages:
 user_query = st.chat_input("Ask something about your store...")
 
 if user_query:
-
-    # user message
+    # User message
     st.session_state.messages.append({
         "role": "user",
         "content": user_query
@@ -100,27 +117,28 @@ if user_query:
     with st.chat_message("user"):
         st.markdown(user_query)
 
-    # assistant response
+    # Assistant response
     with st.chat_message("assistant"):
         with st.spinner("Thinking... 🤔"):
+            try:
+                response = run_pipeline(user_query, vectordb, cfg)
+            except Exception as e:
+                st.error(f"Something went wrong: {e}")
+                response = {
+                    "answer": "Sorry, I couldn't process that question.",
+                    "route": "error",
+                    "evaluation": {}
+                }
 
-            response = run_pipeline(
-                user_query,
-                vectordb,
-                cfg
-            )
-
-        # ---------------------------
-        # DISPLAY ANSWER (FIX HERE)
-        # ---------------------------
+        # Show the answer
         st.markdown(response["answer"])
 
-        # evaluation
+        # Show details in expanders
         with st.expander("📊 Evaluation"):
-            st.write("Route:", response["route"])
-            st.write(response["evaluation"])
+            st.write("**Route:**", response["route"])
+            st.json(response["evaluation"])
 
-    # save assistant message (ONLY answer, not dict)
+    # Save assistant message (only the answer, not the full dict)
     st.session_state.messages.append({
         "role": "assistant",
         "content": response["answer"]
