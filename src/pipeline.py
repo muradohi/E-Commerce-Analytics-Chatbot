@@ -66,18 +66,43 @@ Rules:
     # PATH 3: Hybrid (both)
     # =========================================
     else:  # route == "hybrid"
+        # Step 1: Run Pandas first to get top products
         result, code = run_pandas_query(df, query, llm)
 
-        # Check if Pandas failed or returned empty
+        # Handle errors
         if isinstance(result, str) and result.startswith("Error"):
             sales_context = "Sales data could not be computed for this question."
+            top_products = []
         elif hasattr(result, 'empty') and result.empty:
             sales_context = "No matching sales records found."
+            top_products = []
         else:
             sales_context = f"Code used: {code}\nResult:\n{result}"
+            # Extract product names from result (if it's a Series indexed by name)
+            if hasattr(result, 'index'):
+                top_products = result.index.tolist()
+            else:
+                top_products = []
 
-        # Get review side
-        docs = retrieve_docs(vectordb, query, top_k=cfg["retrieval"]["top_k"])
+        # Step 2: Build a focused query that includes the top products
+        if top_products:
+            focused_query = f"{query} (focus on these products: {', '.join(top_products[:5])})"
+        else:
+            focused_query = query
+
+        # Step 3: Retrieve reviews using the focused query
+        docs = retrieve_docs(vectordb, focused_query, top_k=cfg["retrieval"]["top_k"] * 2)
+
+        # Step 4: Filter to only reviews about top products (if we have them)
+        if top_products:
+            filtered_docs = [
+                d for d in docs
+                if any(prod in d.page_content for prod in top_products)
+            ]
+            # If filtering gave us nothing, fall back to original docs
+            if filtered_docs:
+                docs = filtered_docs[:cfg["retrieval"]["top_k"]]
+
         retrieved_text = "\n\n".join([d.page_content for d in docs])
 
         context = f"SALES DATA:\n{sales_context}\n\nCUSTOMER REVIEWS:\n{retrieved_text}"
@@ -88,21 +113,20 @@ You are a business analyst. Answer the question using BOTH sources below.
 SALES DATA:
 {sales_context}
 
-CUSTOMER REVIEWS:
+CUSTOMER REVIEWS (filtered to top products where possible):
 {retrieved_text}
 
 Question: {query}
 
 Rules:
 - Use both sources where relevant
-- If sales data is missing, answer using only the reviews and explicitly note the missing data
-- Be clear about what each source tells you
-- Do not invent numbers or facts beyond what's shown
+- If a top-revenue product has no negative reviews shown, say so explicitly
+- Do not invent numbers or fabricate reviews
 """
         answer = llm.invoke(prompt).content
 
     # =========================================
-    # Evaluation (runs for all paths)
+    # EVALUATION (runs for ALL paths)
     # =========================================
     evaluation = evaluate_answer(query, context, answer, llm)
 
