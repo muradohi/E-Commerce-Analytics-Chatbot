@@ -2,19 +2,21 @@ import pandas as pd
 
 
 def load_data(cfg):
-    """
-    Loads products and orders, merges them, and adds a revenue column.
-    Returns one combined DataFrame.
-    """
     products = pd.read_csv(cfg["data"]["products"])
     orders = pd.read_csv(cfg["data"]["orders"])
-
-    # Combine orders + products into one table
+    reviews = pd.read_csv(cfg["data"]["reviews"])
+    
+    # Compute review aggregates per product
+    review_stats = reviews.groupby("product_id").agg(
+        avg_rating=("rating", "mean"),
+        review_count=("rating", "count")
+    ).reset_index()
+    
+    # Merge everything
     df = orders.merge(products, on="product_id")
-
-    # Add a new column: revenue = price × quantity
+    df = df.merge(review_stats, on="product_id", how="left")
     df["revenue"] = df["quantity"] * df["price"]
-
+    
     return df
 
 
