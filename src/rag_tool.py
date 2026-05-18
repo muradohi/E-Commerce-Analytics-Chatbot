@@ -3,14 +3,26 @@ from langchain_community.vectorstores import Chroma
 
 
 def build_vectorstore(docs, cfg):
-    """
-    Takes a list of documents and builds a searchable vector database.
-    This is the "indexing" step — done once before queries can be made.
-    """
-    embeddings = OpenAIEmbeddings(model=cfg["embedding"]["model"])
+
+    clean_docs = []
+
+    for d in docs:
+        if (
+            d.page_content is not None
+            and isinstance(d.page_content, str)
+            and d.page_content.strip()
+        ):
+            clean_docs.append(d)
+
+    print(f"Original docs: {len(docs)}")
+    print(f"Valid docs: {len(clean_docs)}")
+
+    embeddings = OpenAIEmbeddings(
+        model=cfg["embedding"]["model"]
+    )
 
     return Chroma.from_documents(
-        documents=docs,
+        documents=clean_docs,
         embedding=embeddings,
         persist_directory=cfg["vectorstore"]["persist_dir"]
     )

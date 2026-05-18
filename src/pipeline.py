@@ -45,7 +45,8 @@ Give a clear, one-paragraph explanation. Do not invent numbers beyond what's sho
     # =========================================
     elif route == "rag":
         docs = retrieve_docs(vectordb, query, top_k=cfg["retrieval"]["top_k"])
-        context = "\n\n".join([d.page_content for d in docs])
+        context = context = "\n\n".join(str(d.page_content)for d in docs if d.page_content is not None
+)
 
         prompt = f"""
 You are an e-commerce assistant. Answer using ONLY the context below.
@@ -103,7 +104,8 @@ Rules:
             if filtered_docs:
                 docs = filtered_docs[:cfg["retrieval"]["top_k"]]
 
-        retrieved_text = "\n\n".join([d.page_content for d in docs])
+        retrieved_text = "\n\n".join(str(d.page_content)for d in docs if d.page_content is not None
+)
 
         context = f"SALES DATA:\n{sales_context}\n\nCUSTOMER REVIEWS:\n{retrieved_text}"
 
